@@ -1,6 +1,10 @@
 ```rust
 #![allow(dead_code)]
 
+#[cfg(feature = "jemalloc")]
+#[global_allocator]
+static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 mod auth;
 mod benchmarks;
 mod cache;
@@ -1231,6 +1235,22 @@ async fn analyze_wasm(
 async fn metrics_handler(
     State(state): State<Arc<AppState>>,
 ) -> Result<impl IntoResponse, AppError> {
+    #[cfg(feature = "jemalloc")]
+    {
+        use tikv_jemalloc_ctl::{epoch, stats};
+        if epoch::advance().is_ok() {
+            if let Ok(allocated) = stats::allocated::read() {
+                state.metrics.process_memory_bytes.with_label_values(&["allocated"]).set(allocated as f64);
+            }
+            if let Ok(resident) = stats::resident::read() {
+                state.metrics.process_memory_bytes.with_label_values(&["resident"]).set(resident as f64);
+            }
+            if let Ok(active) = stats::active::read() {
+                state.metrics.process_memory_bytes.with_label_values(&["active"]).set(active as f64);
+            }
+        }
+    }
+
     let metric_families = state.metrics.registry.gather();
     let encoder = TextEncoder::new();
     let mut buffer = Vec::new();
